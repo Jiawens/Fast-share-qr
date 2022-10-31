@@ -19,6 +19,9 @@ struct Args {
     ///Server's port
     #[clap(short, long, value_parser)]
     port: Option<u16>,
+    ///Server's hostname
+    #[clap(short, long, value_parser)]
+    hostname: Option<String>,
     ///Disable quiet zone of the qr code?
     #[clap(long, action)]
     disable_quiet_zone: bool,
@@ -50,8 +53,8 @@ async fn main() {
 
     let qr_link = match item {
         ItemType::Text(t) => t,
-        ItemType::File(f) => create_server(ItemType::File(f), args.port),
-        ItemType::Directory(d) => create_server(ItemType::Directory(d), args.port),
+        ItemType::File(f) => create_server(ItemType::File(f), args.hostname, args.port),
+        ItemType::Directory(d) => create_server(ItemType::Directory(d), args.hostname, args.port),
     };
 
     let code = qrcode::QrCode::new(qr_link).unwrap();
@@ -67,9 +70,9 @@ async fn main() {
     }
 }
 
-fn create_server(item: ItemType, port: Option<u16>) -> String {
+fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) -> String {
     let port = port.unwrap_or_else(|| portpicker::pick_unused_port().expect("No ports free"));
-    let ip = local_ipaddress::get().expect("Can't get local ip");
+    let hostname = hostname.unwrap_or_else(|| local_ipaddress::get().expect("Can't get local ip"));
 
     tokio::spawn(async move {
         match item {
@@ -99,5 +102,5 @@ fn create_server(item: ItemType, port: Option<u16>) -> String {
             ItemType::Text(_) => unreachable!(),
         }
     });
-    format!("http://{ip}:{port}/")
+    format!("http://{hostname}:{port}/")
 }
