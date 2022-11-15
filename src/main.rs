@@ -13,7 +13,7 @@ struct Args {
     ///File you want to share
     #[clap(short, long, value_parser, group = "input", required = true)]
     file: Option<String>,
-    ///Directory you want to share WARNING: NOT IMPLEMENTED YET
+    ///Directory you want to share
     #[clap(short, long, value_parser, group = "input", required = true)]
     directory: Option<String>,
     ///Server's port
@@ -73,34 +73,77 @@ async fn main() {
 fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) -> String {
     let port = port.unwrap_or_else(|| portpicker::pick_unused_port().expect("No ports free"));
     let hostname = hostname.unwrap_or_else(|| local_ipaddress::get().expect("Can't get local ip"));
-
     tokio::spawn(async move {
         match item {
             ItemType::File(a) => {
                 let file_name = String::from(a.split('/').rev().next().unwrap());
-                let mut headers = warp::http::header::HeaderMap::new();
-                headers.insert(
-                    "Content-Type",
-                    warp::http::header::HeaderValue::from_static("application/octet-stream"),
-                );
-                headers.insert(
-                    "Content-Disposition",
-                    warp::http::header::HeaderValue::from_str(
-                        &("attachment;filename=".to_owned() + &file_name),
-                    )
-                    .unwrap(),
-                );
+                let headers = warp_headers_for_downloading_file(&file_name);
                 let routes = warp::get()
                     .and(warp::path::end())
                     .and(warp::fs::file(file_name))
                     .with(warp::reply::with::headers(headers));
                 warp::serve(routes).run(([0, 0, 0, 0], port)).await;
             }
-            ItemType::Directory(_a) => {
-                todo!("Warp won't automatically list the files. TODO.");
+            ItemType::Directory(a) => {
+                let routes =
+                    warp::any()
+                        .and(warp::path::tail())
+                        .map(move |p: warp::filters::path::Tail| {
+                            let p = format!("{}/{}", &a, p.as_str());
+                            let p = std::path::Path::new(&p);
+                            if p.is_dir() {
+                                use std::io::Write;
+                                let mut body = Vec::new();
+                                for item in std::fs::read_dir(p).unwrap() {
+                                    let item = item.unwrap();
+                                    write!(
+                                        &mut body,
+                                        "<a href=\"/{}\">{}</a><br />",
+                                        item.path().strip_prefix(&a).unwrap().to_str().unwrap(),
+                                        item.file_name().to_str().unwrap()
+                                    )
+                                    .unwrap();
+                                }
+                                return warp::http::Response::builder().body(body).unwrap();
+                            } else if p.is_file() {
+                                use std::io::prelude::*;
+                                let mut file = std::fs::File::open("ls").unwrap();
+                                let mut buffer = Vec::new();
+                                file.read_to_end(&mut buffer).unwrap();
+                                return warp::http::Response::builder()
+                                    .header("Content-Type", "application/octet-stream")
+                                    .header(
+                                        "Content-Disposition",
+                                        a.split('/').rev().next().unwrap(),
+                                    )
+                                    .body(buffer)
+                                    .unwrap();
+                            } else if p.is_symlink() {
+                                todo!()
+                            }
+                            unreachable!()
+                        });
+                warp::serve(routes).run(([0, 0, 0, 0], port)).await;
             }
             ItemType::Text(_) => unreachable!(),
         }
     });
     format!("http://{hostname}:{port}/")
+}
+
+//Example input: hello_world.rs
+//Example output: headers containing: Content-Type: application/octet-stream
+//                                    Content-Disposition: attachment;filename=hello_world.rs
+fn warp_headers_for_downloading_file(file_name: &String) -> warp::http::header::HeaderMap {
+    let mut headers = warp::http::header::HeaderMap::new();
+    headers.insert(
+        "Content-Type",
+        warp::http::header::HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        "Content-Disposition",
+        warp::http::header::HeaderValue::from_str(&format!("attachment;filename={}", file_name))
+            .unwrap(),
+    );
+    headers
 }
