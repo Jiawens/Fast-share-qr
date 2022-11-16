@@ -107,7 +107,7 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
                                 return warp::http::Response::builder().body(body).unwrap();
                             } else if p.is_file() {
                                 use std::io::prelude::*;
-                                let mut file = std::fs::File::open("ls").unwrap();
+                                let mut file = std::fs::File::open(p).unwrap();
                                 let mut buffer = Vec::new();
                                 file.read_to_end(&mut buffer).unwrap();
                                 return warp::http::Response::builder()
