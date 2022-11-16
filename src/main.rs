@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::path::Path;
 use warp::Filter;
 
 #[derive(Parser)]
@@ -27,7 +28,6 @@ struct Args {
     disable_quiet_zone: bool,
 }
 
-#[derive(Debug)]
 enum ItemType {
     Text(String),
     File(String),
@@ -74,10 +74,14 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
     let port = port.unwrap_or_else(|| portpicker::pick_unused_port().expect("No ports free"));
     let hostname = hostname.unwrap_or_else(|| local_ipaddress::get().expect("Can't get local ip"));
     tokio::spawn(async move {
+        //Moving port & hostname into it
         match item {
             ItemType::File(a) => {
-                let file_name = String::from(a.split('/').rev().next().unwrap());
+                let file_name = Path::new(&a).file_name().unwrap();
+                let file_name = file_name.to_str().unwrap().into();
                 let headers = warp_headers_for_downloading_file(&file_name);
+                //This route match /the/file_you_want_to.download
+                //And then send this file
                 let routes = warp::get()
                     .and(warp::path::end())
                     .and(warp::fs::file(file_name))
@@ -85,56 +89,60 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
                 warp::serve(routes).run(([0, 0, 0, 0], port)).await;
             }
             ItemType::Directory(a) => {
-                let routes =
-                    warp::any()
-                        .and(warp::path::tail())
-                        .map(move |p: warp::filters::path::Tail| {
-                            if p.as_str() == "favicon.ico" {
-                                return warp::http::Response::builder()
-                                    .status(404)
-                                    .body(Vec::new())
-                                    .unwrap();
+                //This route match:
+                //1. /the/folder%20you_want_to_look_through
+                //2. /the/file%20you_want_to.download
+                let routes = warp::any()
+                    .and(warp::path::tail()) //So we can process this url ourselves
+                    .map(move |url: warp::filters::path::Tail| {
+                        //Check if browser is requesting favicon.ico
+                        if url.as_str() == "favicon.ico" {
+                            return warp_404_not_found_response();
+                        }
+                        //Browser will turn spaces to %20, so we need to decode them
+                        let url: String = urlencoding::decode(url.as_str()).unwrap().into();
+                        //Add given prefix(a) to left of url
+                        //Example:
+                        //a contains "/usr", url contains "bin", then url will be "/usr/bin"
+                        let path = Path::new(&a).join(Path::new(&url));
+                        //Let's return a 404 when the path dosen't exist
+                        if !path.exists() {
+                            return warp_404_not_found_response();
+                        }
+                        if path.is_dir() {
+                            use std::io::Write;
+                            let mut body = Vec::new();
+                            for item in std::fs::read_dir(path).unwrap() {
+                                let item = item.unwrap();
+                                //Example output: <a href="/usr/share">share</a><br />
+                                write!(
+                                    &mut body,
+                                    "<a href=\"/{}\">{}</a><br />",
+                                    //Strip the given prefix(a) to avoid additional prefix
+                                    //Example:
+                                    //a contains "/usr", item.path() contains "/usr/share"
+                                    //then output will be "/share"
+                                    item.path().strip_prefix(&a).unwrap().to_str().unwrap(),
+                                    item.file_name().to_str().unwrap()
+                                )
+                                .unwrap();
                             }
-                            let p = format!("{}/{}", &a, urlencoding::decode(p.as_str()).unwrap());
-                            if !std::path::Path::new(&p).exists() {
-                                return warp::http::Response::builder()
-                                    .status(404)
-                                    .body(Vec::new())
-                                    .unwrap();
-                            }
-                            let p = std::path::Path::new(&p);
-                            if p.is_dir() {
-                                use std::io::Write;
-                                let mut body = Vec::new();
-                                for item in std::fs::read_dir(p).unwrap() {
-                                    let item = item.unwrap();
-                                    write!(
-                                        &mut body,
-                                        "<a href=\"/{}\">{}</a><br />",
-                                        item.path().strip_prefix(&a).unwrap().to_str().unwrap(),
-                                        item.file_name().to_str().unwrap()
-                                    )
-                                    .unwrap();
-                                }
-                                return warp::http::Response::builder().body(body).unwrap();
-                            } else if p.is_file() {
-                                use std::io::prelude::*;
-                                let mut file = std::fs::File::open(p).unwrap();
-                                let mut buffer = Vec::new();
-                                file.read_to_end(&mut buffer).unwrap();
-                                return warp::http::Response::builder()
-                                    .header("Content-Type", "application/octet-stream")
-                                    .header(
-                                        "Content-Disposition",
-                                        a.split('/').rev().next().unwrap(),
-                                    )
-                                    .body(buffer)
-                                    .unwrap();
-                            } else if p.is_symlink() {
-                                todo!()
-                            }
-                            unreachable!()
-                        });
+                            return warp::http::Response::builder().body(body).unwrap();
+                        } else if path.is_file() {
+                            use std::io::prelude::*;
+                            let mut file = std::fs::File::open(path).unwrap();
+                            let mut buffer = Vec::new();
+                            file.read_to_end(&mut buffer).unwrap();
+                            return warp::http::Response::builder()
+                                .header("Content-Type", "application/octet-stream")
+                                .header("Content-Disposition", a.split('/').rev().next().unwrap())
+                                .body(buffer)
+                                .unwrap();
+                        } else if path.is_symlink() {
+                            todo!()
+                        }
+                        unreachable!()
+                    });
                 warp::serve(routes).run(([0, 0, 0, 0], port)).await;
             }
             ItemType::Text(_) => unreachable!(),
@@ -147,15 +155,24 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
 //Example output: headers containing: Content-Type: application/octet-stream
 //                                    Content-Disposition: attachment;filename=hello_world.rs
 fn warp_headers_for_downloading_file(file_name: &String) -> warp::http::header::HeaderMap {
-    let mut headers = warp::http::header::HeaderMap::new();
+    use warp::http::header::{HeaderMap, HeaderValue};
+
+    let mut headers = HeaderMap::new();
     headers.insert(
         "Content-Type",
-        warp::http::header::HeaderValue::from_static("application/octet-stream"),
+        HeaderValue::from_static("application/octet-stream"),
     );
     headers.insert(
         "Content-Disposition",
-        warp::http::header::HeaderValue::from_str(&format!("attachment;filename={}", file_name))
-            .unwrap(),
+        HeaderValue::from_str(&format!("attachment;filename={}", file_name)).unwrap(),
     );
     headers
+}
+
+//Return a 404 response with empty body
+fn warp_404_not_found_response() -> warp::http::Response<Vec<u8>> {
+    warp::http::Response::builder()
+        .status(404)
+        .body(Vec::new())
+        .unwrap()
 }
