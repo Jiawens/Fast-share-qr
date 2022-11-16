@@ -96,6 +96,12 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
                                     .unwrap();
                             }
                             let p = format!("{}/{}", &a, urlencoding::decode(p.as_str()).unwrap());
+                            if !std::path::Path::new(&p).exists() {
+                                return warp::http::Response::builder()
+                                    .status(404)
+                                    .body(Vec::new())
+                                    .unwrap();
+                            }
                             let p = std::path::Path::new(&p);
                             if p.is_dir() {
                                 use std::io::Write;
