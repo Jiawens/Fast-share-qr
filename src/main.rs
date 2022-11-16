@@ -89,6 +89,12 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
                     warp::any()
                         .and(warp::path::tail())
                         .map(move |p: warp::filters::path::Tail| {
+                            if p.as_str() == "favicon.ico" {
+                                return warp::http::Response::builder()
+                                    .status(404)
+                                    .body(Vec::new())
+                                    .unwrap();
+                            }
                             let p = format!("{}/{}", &a, p.as_str());
                             let p = std::path::Path::new(&p);
                             if p.is_dir() {
