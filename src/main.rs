@@ -95,7 +95,7 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
                                     .body(Vec::new())
                                     .unwrap();
                             }
-                            let p = format!("{}/{}", &a, p.as_str());
+                            let p = format!("{}/{}", &a, urlencoding::decode(p.as_str()).unwrap());
                             let p = std::path::Path::new(&p);
                             if p.is_dir() {
                                 use std::io::Write;
