@@ -75,9 +75,7 @@ async fn main() {
         .build();
     println!("{}", string);
 
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(16)).await;
-    }
+    tokio::signal::ctrl_c().await.unwrap();
 }
 
 fn create_server(item: ItemType, hostname: String, port: u16) -> String {
