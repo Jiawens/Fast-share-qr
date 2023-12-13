@@ -77,14 +77,13 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
         //Moving port & hostname into it
         match item {
             ItemType::File(a) => {
-                let file_name = Path::new(&a).file_name().unwrap();
-                let file_name = file_name.to_str().unwrap().into();
-                let headers = warp_headers_for_downloading_file(&file_name);
+                let file_name = Path::new(&a).file_name().unwrap().to_str().unwrap();
+                let headers = warp_headers_for_downloading_file(&file_name.to_owned());
                 //This route match /the/file_you_want_to.download
                 //And then send this file
                 let routes = warp::get()
                     .and(warp::path::end())
-                    .and(warp::fs::file(file_name))
+                        .and(warp::fs::file(std::path::PathBuf::from(a)))
                     .with(warp::reply::with::headers(headers));
                 warp::serve(routes).run(([0, 0, 0, 0], port)).await;
             }
