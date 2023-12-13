@@ -134,7 +134,7 @@ fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) ->
                             file.read_to_end(&mut buffer).unwrap();
                             return warp::http::Response::builder()
                                 .header("Content-Type", "application/octet-stream")
-                                .header("Content-Disposition", a.split('/').rev().next().unwrap())
+                                .header("Content-Disposition", a.split('/').next_back().unwrap())
                                 .body(buffer)
                                 .unwrap();
                         } else if path.is_symlink() {
