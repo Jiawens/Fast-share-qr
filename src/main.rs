@@ -26,6 +26,9 @@ struct Args {
     ///Disable quiet zone of the qr code?
     #[clap(long, action)]
     disable_quiet_zone: bool,
+    ///Only prints the qr code?
+    #[clap(long, action)]
+    qr_only: bool,
 }
 
 enum ItemType {
@@ -51,10 +54,17 @@ async fn main() {
         unreachable!();
     })();
 
+    let hostname = args.hostname.unwrap_or_else(|| local_ipaddress::get().expect("Can't get local ip"));
+    let port = args.port.unwrap_or_else(|| portpicker::pick_unused_port().expect("No ports free"));
+
+    if !args.qr_only {
+        println!(":3 http://{hostname}:{port}/", hostname = hostname, port = port);
+    }
+
     let qr_link = match item {
         ItemType::Text(t) => t,
-        ItemType::File(f) => create_server(ItemType::File(f), args.hostname, args.port),
-        ItemType::Directory(d) => create_server(ItemType::Directory(d), args.hostname, args.port),
+        ItemType::File(f) => create_server(ItemType::File(f), hostname, port),
+        ItemType::Directory(d) => create_server(ItemType::Directory(d), hostname, port),
     };
 
     let code = qrcode::QrCode::new(qr_link).unwrap();
@@ -70,9 +80,7 @@ async fn main() {
     }
 }
 
-fn create_server(item: ItemType, hostname: Option<String>, port: Option<u16>) -> String {
-    let port = port.unwrap_or_else(|| portpicker::pick_unused_port().expect("No ports free"));
-    let hostname = hostname.unwrap_or_else(|| local_ipaddress::get().expect("Can't get local ip"));
+fn create_server(item: ItemType, hostname: String, port: u16) -> String {
     tokio::spawn(async move {
         //Moving port & hostname into it
         match item {
