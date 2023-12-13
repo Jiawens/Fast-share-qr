@@ -24,9 +24,3 @@ OPTIONS:
     -t, --text <TEXT>              Text you want to share
     -V, --version                  Print version information
 ```
-
-### Note
-
-Directory sharing haven't been implemented.
-
-Only one item can be shared within one instance.
